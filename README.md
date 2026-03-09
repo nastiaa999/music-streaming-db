@@ -21,7 +21,7 @@
 
 ## ER-диаграмма
 
-![ER Diagram](er-model/er-diagram.png)
+![ER Diagram](diagrams/er-diagram.png)
 
 Подробное описание модели:
 - [ER Model](docs/er-model.md)
