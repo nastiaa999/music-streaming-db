@@ -23,7 +23,7 @@
 * повышения производительности
 * независимости схемы от изменений естественных атрибутов.
 
-![Relational Diagram](relational-model.png)
+![Relational Diagram](diagrems/relational-diagram.png)
 
 Связи между сущностями реализованы **через внешние ключи**.
 
