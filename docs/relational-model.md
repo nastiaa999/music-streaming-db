@@ -1,179 +1,132 @@
-# Relational Model
+# Реляционная модель базы данных
 
-## Переход от ER-модели к реляционной
+Документ описывает реляционную схему базы данных музыкального стримингового сервиса. Модель спроектирована с учетом требований нормализации, бизнес-правил предметной области и оптимизации для выполнения аналитических запросов на больших объемах данных.
 
-В ER-модели сущности идентифицировались **естественными ключами**:
+## Ключевые проектные решения
 
-* исполнитель — по `artist_nickname`
-* альбом — по `(artist, album_name)`
-* трек — по `(artist, song_name)`
-
-В реляционной модели для всех сущностей введены **суррогатные первичные ключи**:
-
-* `artist_id`
-* `album_id`
-* `song_id`
-* `user_id`
-* `playlist_id`
-* `history_id`
-
-Это сделано для:
-
-* упрощения связей между таблицами
-* повышения производительности
-* независимости схемы от изменений естественных атрибутов.
-
-![Relational Diagram](diagrems/relational-diagram.png)
-
-Связи между сущностями реализованы **через внешние ключи**.
-
-Связи **многие-ко-многим (M:N)** преобразованы в отдельные таблицы:
-
-| Связь           | Промежуточная таблица |
-| --------------- | --------------------- |
-| Song — Artist   | `song_artist`         |
-| Playlist — Song | `playlist_song`       |
+* **Суррогатные первичные ключи.** Для всех сущностей введены суррогатные ключи (`artist_id`, `song_id`, `user_id` и т.д.) вместо естественных. Это упрощает связи между таблицами, повышает производительность JOIN-операций и защищает схему от изменений бизнес-атрибутов (например, смены псевдонима артиста).
+* **Разрешение связей M:N.** Связи «многие-ко-многим» вынесены в отдельные ассоциативные таблицы (`song_artist`, `playlist_song`) с добавлением собственных атрибутов связи.
+* **Контролируемая денормализация.** Агрегированные метрики (`num_albums`, `num_songs`, `duration`) физически хранятся в таблицах. Это исключает необходимость выполнения ресурсоемких операций `COUNT()` и `SUM()` при чтении. Актуальность данных поддерживается автоматически на уровне СУБД.
 
 ---
 
-# Tables
+## Схема таблиц
 
-## Artists
+### Artists (Исполнители)
+Хранит информацию об артистах и музыкальных группах.
 
-Хранит информацию об исполнителях.
+| Column | Type | Key | Null | Default | Description |
+|---|---|---|---|---|---|
+| artist_id | SERIAL | PK | NOT NULL | | Суррогатный ключ |
+| artist_nickname | VARCHAR(100) | Unique | NOT NULL | | Сценический псевдоним |
+| artist_name | VARCHAR(100) | | NULL | NULL | Настоящее имя / название группы |
+| birth_date | DATE | | NULL | NULL | Дата рождения или основания |
+| country | VARCHAR(65) | | NULL | NULL | Страна происхождения |
+| num_albums | INTEGER | | NOT NULL | 0 | Количество альбомов (вычисляемое) |
+| num_songs | INTEGER | | NOT NULL | 0 | Количество треков (вычисляемое) |
 
-| Column          | Type         | Key    | NULL     | Default | Description           |
-| --------------- | ------------ | ------ | -------- | ------- | --------------------- |
-| artist_id       | SERIAL       | PK     | NOT NULL |         | Суррогатный ключ      |
-| artist_nickname | VARCHAR(100) | UNIQUE | NOT NULL |         | Сценический псевдоним |
-| artist_name     | VARCHAR(100) |        | NULL     |         | Настоящее имя         |
-| birth_date      | DATE         |        | NULL     |         | Дата рождения         |
-| country         | VARCHAR(65)  |        | NULL     |         | Страна                |
-| num_albums      | INTEGER      |        | NOT NULL | 0       | Количество альбомов   |
-| num_songs       | INTEGER      |        | NOT NULL | 0       | Количество треков     |
+### Albums (Альбомы)
+Информация о музыкальных релизах.
 
-Поля `num_albums` и `num_songs` используются для быстрого отображения статистики.
+| Column | Type | Key | Null | Default | Description |
+|---|---|---|---|---|---|
+| album_id | SERIAL | PK | NOT NULL | | Суррогатный ключ |
+| artist_id | INTEGER | FK | NOT NULL | | Ссылка на artists (CASCADE) |
+| album_name | VARCHAR(200) | | NOT NULL | | Название альбома |
+| release_date | DATE | | NULL | NULL | Дата выпуска |
+| duration | INTEGER | | NULL | NULL | Общая длительность в секундах |
+| genre | VARCHAR(50) | | NULL | NULL | Основной жанр |
+| num_songs | INTEGER | | NOT NULL | 0 | Количество треков (вычисляемое) |
+| cover_image | VARCHAR(500) | | NULL | NULL | URL обложки |
 
----
+### Songs (Треки)
+Хранит данные о музыкальных композициях. Связь с альбомом опциональна для поддержки синглов.
 
-## Albums
+| Column | Type | Key | Null | Default | Description |
+|---|---|---|---|---|---|
+| song_id | SERIAL | PK | NOT NULL | | Суррогатный ключ |
+| album_id | INTEGER | FK | NULL | NULL | Ссылка на albums (SET NULL) |
+| song_name | VARCHAR(200) | | NOT NULL | | Название трека |
+| track_number | INTEGER | | NULL | NULL | Порядковый номер в альбоме |
+| duration | INTEGER | | NOT NULL | | Длительность в секундах |
+| release_date | DATE | | NULL | NULL | Дата выхода |
+| lyrics | TEXT | | NULL | NULL | Текст песни |
+| genre | VARCHAR(50) | | NULL | NULL | Жанр |
 
-Хранит информацию об альбомах.
+### Song Artist (Связь трека и исполнителя)
+Ассоциативная таблица для реализации связи M:N. Позволяет указывать несколько исполнителей для одного трека.
 
-| Column       | Type         | Key | NULL     | Default | Description         |
-| ------------ | ------------ | --- | -------- | ------- | ------------------- |
-| album_id     | SERIAL       | PK  | NOT NULL |         | Суррогатный ключ    |
-| artist_id    | INTEGER      | FK  | NOT NULL |         | → artists.artist_id |
-| album_name   | VARCHAR(200) |     | NOT NULL |         | Название альбома    |
-| release_date | DATE         |     | NULL     |         | Дата выхода         |
-| duration     | INTEGER      |     | NULL     |         | Длительность (сек)  |
-| genre        | VARCHAR(50)  |     | NULL     |         | Жанр                |
-| num_songs    | INTEGER      |     | NOT NULL | 0       | Количество треков   |
+| Column | Type | Key | Null | Default | Description |
+|---|---|---|---|---|---|
+| song_id | INTEGER | PK, FK | NOT NULL | | Ссылка на songs (CASCADE) |
+| artist_id | INTEGER | PK, FK | NOT NULL | | Ссылка на artists (CASCADE) |
+| is_featured | BOOLEAN | | NOT NULL | FALSE | Флаг приглашенного артиста (фит) |
 
----
+### Users (Пользователи)
+Данные зарегистрированных пользователей сервиса.
 
-## Songs
+| Column | Type | Key | Null | Default | Description |
+|---|---|---|---|---|---|
+| user_id | SERIAL | PK | NOT NULL | | Суррогатный ключ |
+| username | VARCHAR(50) | | NOT NULL | | Имя пользователя |
+| email | VARCHAR(255) | Unique | NOT NULL | | Уникальный email |
+| password_hash | VARCHAR(200) | | NOT NULL | | Хеш пароля |
+| registration_date | TIMESTAMP | | NOT NULL | NOW() | Дата регистрации |
+| is_premium | BOOLEAN | | NOT NULL | FALSE | Флаг премиум-подписки |
+| birth_date | DATE | | NULL | NULL | Дата рождения |
 
-Хранит информацию о музыкальных треках.
+### Playlists (Плейлисты)
+Пользовательские подборки треков.
 
-| Column       | Type         | Key | NULL     | Default | Description        |
-| ------------ | ------------ | --- | -------- | ------- | ------------------ |
-| song_id      | SERIAL       | PK  | NOT NULL |         | Суррогатный ключ   |
-| album_id     | INTEGER      | FK  | NULL     |         | → albums.album_id  |
-| song_name    | VARCHAR(200) |     | NOT NULL |         | Название трека     |
-| track_number | INTEGER      |     | NULL     |         | Номер в альбоме    |
-| duration     | INTEGER      |     | NOT NULL |         | Длительность (сек) |
-| release_date | DATE         |     | NULL     |         | Дата выхода        |
-| lyrics       | TEXT         |     | NULL     |         | Текст песни        |
-| genre        | VARCHAR(50)  |     | NULL     |         | Жанр               |
+| Column | Type | Key | Null | Default | Description |
+|---|---|---|---|---|---|
+| playlist_id | SERIAL | PK | NOT NULL | | Суррогатный ключ |
+| user_id | INTEGER | FK | NOT NULL | | Ссылка на users (CASCADE) |
+| playlist_name | VARCHAR(200) | | NOT NULL | | Название плейлиста |
+| duration | INTEGER | | NOT NULL | 0 | Общая длительность (вычисляемое) |
+| num_songs | INTEGER | | NOT NULL | 0 | Количество треков (вычисляемое) |
+| is_public | BOOLEAN | | NOT NULL | TRUE | Флаг публичного доступа |
+| is_default | BOOLEAN | | NOT NULL | FALSE | Системный плейлист «Избранное» |
 
-`album_id` может быть `NULL`, так как трек может быть выпущен **как сингл**.
+### Playlist Song (Связь плейлиста и трека)
+Ассоциативная таблица для связи M:N с сохранением порядка воспроизведения.
 
----
+| Column | Type | Key | Null | Default | Description |
+|---|---|---|---|---|---|
+| playlist_id | INTEGER | PK, FK | NOT NULL | | Ссылка на playlists (CASCADE) |
+| song_id | INTEGER | PK, FK | NOT NULL | | Ссылка на songs (CASCADE) |
+| order_number | INTEGER | | NOT NULL | | Позиция трека в плейлисте |
 
-## Song Artist
+### Listening History (История прослушиваний)
+Основная таблица для сбора аналитики. Фиксирует каждый факт прослушивания.
 
-Промежуточная таблица для связи **трека и исполнителя (M:N)**.
-
-| Column      | Type    | Key    | NULL     | Default | Description         |
-| ----------- | ------- | ------ | -------- | ------- | ------------------- |
-| song_id     | INTEGER | PK, FK | NOT NULL |         | → songs.song_id     |
-| artist_id   | INTEGER | PK, FK | NOT NULL |         | → artists.artist_id |
-| is_featured | BOOLEAN |        | NOT NULL | FALSE   | Приглашенный артист |
-
-Составной первичный ключ:
-
-```
-(song_id, artist_id)
-```
-
-Поле `is_featured` позволяет отличить **основного исполнителя** от **фита**.
-
----
-
-## Users
-
-Хранит информацию о пользователях сервиса.
-
-| Column            | Type         | Key    | NULL     | Default | Description      |
-| ----------------- | ------------ | ------ | -------- | ------- | ---------------- |
-| user_id           | SERIAL       | PK     | NOT NULL |         | Суррогатный ключ |
-| username          | VARCHAR(50)  | UNIQUE | NOT NULL |         | Имя пользователя |
-| email             | VARCHAR(255) | UNIQUE | NOT NULL |         | Email            |
-| password_hash     | VARCHAR(200) |        | NOT NULL |         | Хеш пароля       |
-| registration_date | TIMESTAMP    |        | NOT NULL | NOW()   | Дата регистрации |
-| is_premium        | BOOLEAN      |        | NOT NULL | FALSE   | Премиум подписка |
-
----
-
-## Playlists
-
-Плейлисты пользователей.
-
-| Column        | Type         | Key | NULL     | Default | Description          |
-| ------------- | ------------ | --- | -------- | ------- | -------------------- |
-| playlist_id   | SERIAL       | PK  | NOT NULL |         | Суррогатный ключ     |
-| user_id       | INTEGER      | FK  | NOT NULL |         | → users.user_id      |
-| playlist_name | VARCHAR(200) |     | NOT NULL |         | Название             |
-| duration      | INTEGER      |     | NOT NULL | 0       | Общая длительность   |
-| num_songs     | INTEGER      |     | NOT NULL | 0       | Количество треков    |
-| is_public     | BOOLEAN      |     | NOT NULL | TRUE    | Публичность          |
-| is_default    | BOOLEAN      |     | NOT NULL | FALSE   | Плейлист «Избранное» |
-
-Плейлист **«Избранное»** автоматически создаётся при регистрации пользователя.
+| Column | Type | Key | Null | Default | Description |
+|---|---|---|---|---|---|
+| history_id | SERIAL | PK | NOT NULL | | Суррогатный ключ |
+| user_id | INTEGER | FK | NOT NULL | | Ссылка на users (CASCADE) |
+| song_id | INTEGER | FK | NOT NULL | | Ссылка на songs (CASCADE) |
+| listened_at | TIMESTAMP | | NOT NULL | NOW() | Временная метка прослушивания |
 
 ---
 
-## Playlist Song
+## Нормализация
 
-Связь **плейлист — трек (M:N)**.
-
-| Column       | Type    | Key    | NULL     | Default | Description             |
-| ------------ | ------- | ------ | -------- | ------- | ----------------------- |
-| playlist_id  | INTEGER | PK, FK | NOT NULL |         | → playlists.playlist_id |
-| song_id      | INTEGER | PK, FK | NOT NULL |         | → songs.song_id         |
-| order_number | INTEGER |        | NOT NULL |         | Порядок трека           |
-
-Составной первичный ключ:
-
-```
-(playlist_id, song_id)
-```
-
-`order_number` определяет позицию трека в плейлисте.
+Схема базы данных приведена к **четвертой нормальной форме (4НФ)**.
+* **1НФ - 3НФ и БКНФ:** Все атрибуты атомарны, отсутствуют частичные и транзитивные зависимости. Все детерминанты нетривиальных функциональных зависимостей являются ключами-кандидатами.
+* **4НФ:** Многозначные зависимости исключены путем вынесения связей M:N в ассоциативные таблицы (`song_artist`, `playlist_song`).
 
 ---
 
-## Listening History
+## Целостность данных и бизнес-логика
 
-История прослушивания треков пользователями.
+### Ограничения (Constraints)
+* **Уникальность (UNIQUE):** Псевдонимы исполнителей, email пользователей, комбинация `(user_id, playlist_name)`, комбинация `(album_id, track_number)`.
+* **Проверочные (CHECK):** Длительность треков и альбомов строго положительна. Даты релизов и рождения не могут находиться в будущем. Номер трека обязателен, если указана ссылка на альбом.
+* **Ссылочная целостность:** Настроены каскадные удаления (`ON DELETE CASCADE`) для зависимых сущностей. При удалении альбома у треков `album_id` устанавливается в `NULL` (сохранение синглов).
 
-| Column      | Type      | Key | NULL     | Default | Description         |
-| ----------- | --------- | --- | -------- | ------- | ------------------- |
-| history_id  | BIGSERIAL | PK  | NOT NULL |         | Суррогатный ключ    |
-| user_id     | INTEGER   | FK  | NOT NULL |         | → users.user_id     |
-| song_id     | INTEGER   | FK  | NOT NULL |         | → songs.song_id     |
-| listened_at | TIMESTAMP |     | NOT NULL | NOW()   | Время прослушивания |
-
-Таблица фиксирует **каждый факт прослушивания**.
-Использование `BIGSERIAL` позволяет хранить **миллионы записей** без переполнения.
+### Триггеры (Triggers)
+Для автоматизации бизнес-логики и поддержания денормализованных метрик на уровне СУБД реализованы следующие триггеры:
+* **update_album_stats:** Пересчет `num_songs` и `duration` в таблице `albums` при INSERT/UPDATE/DELETE в `songs`.
+* **update_artist_stats:** Обновление `num_albums` и `num_songs` в таблице `artists` при изменении `albums` и `song_artist`.
+* **update_playlist_stats:** Пересчет `num_songs` и `duration` в таблице `playlists` при изменении состава `playlist_song`.
+* **create_default_playlist:** Автоматическое создание системного плейлиста «Избранное» (`is_default = TRUE`) при регистрации нового пользователя (INSERT в `users`).
